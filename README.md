@@ -40,7 +40,21 @@ The result is a time-based re-entry primitive that is stateless, auditable, and 
    |         |                  archive-deferred.sh |
    |         |                       |-- sweep terminal records
 ```
-
+### Example Task Snapshot
+``` bash
+{
+  "id": "task_20260408_163500_4821",
+  "created_at": "2026-04-08T16:35:00Z",
+  "run_at": "2026-04-08T17:05:00Z",
+  "intent": "resume_task",
+  "summary": "Resume the architecture review",
+  "status": "scheduled",
+  "execution": {
+    "mode": "fresh",
+    "aura_level": "low"
+  }
+}
+```
 See [docs/architecture.md](docs/architecture.md) for the full design and [docs/lifecycle.md](docs/lifecycle.md) for state transitions.
 
 This is not a long-running agent system.
