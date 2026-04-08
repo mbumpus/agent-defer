@@ -40,6 +40,7 @@ The result is a time-based re-entry primitive that is stateless, auditable, and 
    |         |                  archive-deferred.sh |
    |         |                       |-- sweep terminal records
 ```
+Each scheduled task is stored as a single JSON object per line in `deferred.jsonl`:
 ### Example Task Snapshot
 ``` bash
 {
