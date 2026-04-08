@@ -41,6 +41,12 @@ The result is a time-based re-entry primitive that is stateless, auditable, and 
 
 See [docs/architecture.md](docs/architecture.md) for the full design and [docs/lifecycle.md](docs/lifecycle.md) for state transitions.
 
+### This is not a long-running agent system.
+### This is not a memory layer.
+### This is not a workflow engine.
+
+It is a minimal deferred execution primitive.
+
 ## Quick Start
 
 ### 1. Schedule a task
