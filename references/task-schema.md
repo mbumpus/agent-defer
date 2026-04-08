@@ -31,6 +31,8 @@
     "aura_level": "low"
   },
   "status": "scheduled",
+  "attempts": 0,
+  "max_retries": 2,
   "reorient": {
     "requested": true,
     "project": null,
@@ -49,6 +51,8 @@
 
 Terminal records are moved to `archive/deferred_YYYYMM.jsonl`.
 
+When an executor fails and `attempts < max_retries`, the task is returned to `scheduled` with a new `run_at`, updated `attempts`, and `last_error`.
+
 ## Executor Contract
 
 If `DEFER_EXECUTOR` is set, it must be an executable path. The executor:
@@ -61,3 +65,16 @@ If `DEFER_EXECUTOR` is set, it must be an executable path. The executor:
 The executor is intentionally simple so the skill remains stateless and auditable.
 
 If `DEFER_EXECUTOR` is not set, the skill still rehydrates the task into `logs/<task-id>.prompt.txt` so the operator can inspect or replay it manually.
+
+## Execution Fields
+
+- `execution.mode`: `fresh` or `callback`
+- `execution.prompt_template`: instruction passed into the future run
+- `execution.aura_level`: advisory execution-intensity hint. Current scripts accept `low`, `medium`, and `high` and persist the value for downstream executors.
+
+## Scheduling Policy
+
+- Non-ISO time expressions are interpreted in machine time, or in `DEFER_TIMEZONE` if configured.
+- Explicit timezone suffixes such as `3pm EST` are rejected.
+- `attempts` starts at `0` and increments on executor retries or terminal executor failures.
+- `max_retries` controls how many executor failures are retried before the task becomes terminal.

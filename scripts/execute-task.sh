@@ -47,6 +47,8 @@ final_prompt="$(
 printf '%s\n' "$final_prompt" > "$prompt_path"
 
 completed_at="$(now_utc_iso)"
+attempts="$(printf '%s' "$task_json" | jq -r '.attempts // 0')"
+max_retries="$(printf '%s' "$task_json" | jq -r '.max_retries // 0')"
 
 if [ -n "${DEFER_EXECUTOR:-}" ]; then
   if [ ! -x "$DEFER_EXECUTOR" ]; then
@@ -79,12 +81,38 @@ if [ -n "${DEFER_EXECUTOR:-}" ]; then
     exit 0
   fi
 
+  if [ "$attempts" -lt "$max_retries" ]; then
+    next_run_at="$(retry_run_at)"
+    updated_json="$(printf '%s' "$task_json" | jq \
+      --arg run_at "$next_run_at" \
+      --arg retried_at "$completed_at" \
+      --arg error "$executor_output" \
+      --arg prompt_path "$prompt_path" \
+      --argjson attempts "$((attempts + 1))" \
+      '.status = "scheduled"
+      | .run_at = $run_at
+      | .attempts = $attempts
+      | .last_attempt_at = $retried_at
+      | .last_error = $error
+      | .result = {
+          type: "retry_scheduled",
+          next_run_at: $run_at,
+          prompt_path: $prompt_path
+        }')"
+    replace_task_record "$updated_json"
+    log_line "retry scheduled id=$task_id attempt=$((attempts + 1)) next_run_at=$next_run_at"
+    printf '%s\n' "$updated_json"
+    exit 0
+  fi
+
   updated_json="$(printf '%s' "$task_json" | jq \
     --arg failed_at "$completed_at" \
     --arg error "$executor_output" \
     --arg prompt_path "$prompt_path" \
+    --argjson attempts "$((attempts + 1))" \
     '.status = "failed"
     | .failed_at = $failed_at
+    | .attempts = $attempts
     | .error = $error
     | .result = {
         type: "executor_failed",

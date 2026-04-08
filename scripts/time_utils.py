@@ -4,7 +4,7 @@ import argparse
 import os
 import re
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 
 try:
     from zoneinfo import ZoneInfo
@@ -20,6 +20,39 @@ VERBOSE_DURATION_RE = re.compile(
     r"(?P<value>\d+)\s*(?P<unit>weeks?|days?|hours?|hrs?|minutes?|mins?|seconds?|secs?)",
     re.IGNORECASE,
 )
+WEEKDAY_INDEX = {
+    "monday": 0,
+    "tuesday": 1,
+    "wednesday": 2,
+    "thursday": 3,
+    "friday": 4,
+    "saturday": 5,
+    "sunday": 6,
+}
+TIMEZONE_TOKENS = {
+    "utc",
+    "gmt",
+    "est",
+    "edt",
+    "cst",
+    "cdt",
+    "mst",
+    "mdt",
+    "pst",
+    "pdt",
+    "cet",
+    "cest",
+    "eet",
+    "eest",
+    "bst",
+    "ist",
+    "jst",
+    "aest",
+    "aedt",
+    "akst",
+    "akdt",
+    "hst",
+}
 
 
 def local_tz():
@@ -54,6 +87,10 @@ def parse_iso(raw, tzinfo):
 def parse_clock(raw):
     text = raw.strip().lower().replace(".", "")
     text = re.sub(r"\s+", " ", text)
+    if text == "noon":
+        return time(12, 0)
+    if text == "midnight":
+        return time(0, 0)
     text = re.sub(r"(\d)\s*(am|pm)$", r"\1\2", text)
     for fmt in ("%I%p", "%I:%M%p", "%H:%M", "%H%M"):
         try:
@@ -113,6 +150,37 @@ def parse_day_phrase(raw, now_local):
     return datetime.combine(target_date, now_local.timetz().replace(tzinfo=None), tzinfo=now_local.tzinfo)
 
 
+def parse_weekday_phrase(raw, now_local):
+    match = re.fullmatch(r"next\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)(?:\s+(.+))?", raw.strip(), re.IGNORECASE)
+    if not match:
+        return None
+
+    weekday_name = match.group(1).lower()
+    clock_part = match.group(2)
+    target_weekday = WEEKDAY_INDEX[weekday_name]
+    days_ahead = (target_weekday - now_local.weekday()) % 7
+    if days_ahead == 0:
+        days_ahead = 7
+
+    target_date = now_local.date() + timedelta(days=days_ahead)
+    if clock_part:
+        clock = parse_clock(clock_part)
+        return datetime.combine(target_date, clock, tzinfo=now_local.tzinfo)
+    return datetime.combine(target_date, now_local.timetz().replace(tzinfo=None), tzinfo=now_local.tzinfo)
+
+
+def reject_explicit_timezone(raw):
+    tokens = raw.strip().split()
+    if not tokens:
+        return
+
+    last_token = tokens[-1].lower().rstrip(",")
+    if last_token in TIMEZONE_TOKENS or ("/" in last_token and last_token[0].isalpha()):
+        raise ValueError(
+            "Explicit timezone suffixes are not supported. Use machine time or set DEFER_TIMEZONE."
+        )
+
+
 def parse_time_expression(raw):
     tzinfo = local_tz()
     now_local = datetime.now(tzinfo)
@@ -125,13 +193,25 @@ def parse_time_expression(raw):
     if lowered == "now":
         return now_local
 
+    if lowered == "noon":
+        return datetime.combine(now_local.date(), time(12, 0), tzinfo=tzinfo)
+
+    if lowered == "midnight":
+        return datetime.combine(now_local.date() + timedelta(days=1), time(0, 0), tzinfo=tzinfo)
+
     iso_value = parse_iso(text, tzinfo)
     if iso_value is not None:
         return iso_value
 
+    reject_explicit_timezone(text)
+
     day_phrase = parse_day_phrase(text, now_local)
     if day_phrase is not None:
         return day_phrase
+
+    weekday_phrase = parse_weekday_phrase(text, now_local)
+    if weekday_phrase is not None:
+        return weekday_phrase
 
     if lowered.startswith("+"):
         lowered = lowered[1:].strip()

@@ -21,8 +21,11 @@ This keeps the system stateless, log-driven, auditable, and easy to replay.
 ### `defer`
 
 - Schedules future work with natural-language or duration-based time input
+- Accepts direct phrases like `noon`, `midnight`, and `next monday 9am`
+- Interprets naive times in machine time or `DEFER_TIMEZONE` if configured
 - Persists compact task snapshots to JSONL
 - Supports `fresh` and `callback` execution modes
+- Supports `--dry-run`, `list`, `cancel`, and simple retry configuration
 - Rehydrates due tasks from cron
 - Logs scheduling, execution, failure, and archival events
 
@@ -63,14 +66,35 @@ Schedule a deferred task:
   --intent "resume_task"
 ```
 
+Preview a task without writing it:
+
+```bash
+./scripts/schedule-task.sh \
+  --when "noon" \
+  --summary "Check the build at midday" \
+  --dry-run
+```
+
 Schedule a task after reorienting from a context file:
 
 ```bash
 ./scripts/schedule-task.sh \
-  --when "tomorrow 9am" \
+  --when "next monday 9am" \
   --reorient \
   --context-file "/abs/path/to/CONTEXT.md" \
   --summary "Continue the review with fresh context"
+```
+
+List pending tasks:
+
+```bash
+./scripts/schedule-task.sh list
+```
+
+Cancel a scheduled task:
+
+```bash
+./scripts/schedule-task.sh cancel --id "task_20260408_163500_4821" --reason "No longer needed"
 ```
 
 Run due tasks manually:
@@ -105,9 +129,14 @@ You can override that with:
 - `DEFER_TIMEZONE`
 - `DEFER_EXECUTOR`
 - `DEFER_CONTEXT_FILE`
+- `DEFER_RETRY_DELAY_SECONDS`
 
 ## Notes
 
 - `DEFER_EXECUTOR` is optional. If it is not set, execution writes a rehydration prompt artifact instead of invoking an external executor.
+- All non-ISO time expressions are interpreted in machine time, or in `DEFER_TIMEZONE` if that environment variable is set.
+- Explicit timezone suffixes such as `3pm EST` are intentionally rejected to keep scheduling deterministic.
+- `aura_level` is an advisory execution-intensity hint stored on the task and passed through to the executor. The current scripts accept `low`, `medium`, and `high`.
+- `max_retries` reschedules executor failures for a later attempt. The retry delay defaults to 60 seconds and can be overridden with `DEFER_RETRY_DELAY_SECONDS`.
 - The runtime intentionally lives outside the repo by default so scheduled state and logs do not pollute the source tree.
 - This repository is licensed under `MIT`. That applies to both the scripts and the skill Markdown files, since the Markdown is part of the instruction surface.

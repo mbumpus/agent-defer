@@ -38,6 +38,8 @@ Examples:
 - `::defer 10m remind me to check the build`
 - `::defer 2h resume this analysis`
 - `::defer tomorrow 9am follow up with the latest findings`
+- `::defer noon check whether the deploy cleared`
+- `::defer next monday 9am resume the architecture review`
 
 Translate the request into:
 
@@ -45,6 +47,8 @@ Translate the request into:
 - `intent`: `resume_task`, `notify`, or `execute_action`
 - `mode`: `fresh` by default, `callback` only when continuation framing matters
 - `prompt_template`: the instruction the future invocation should execute
+
+Interpret naive times in machine time unless `DEFER_TIMEZONE` is set. Reject timezone-qualified phrases like `3pm EST` instead of guessing.
 
 ### 2. Build the snapshot
 
@@ -74,6 +78,22 @@ Use the deterministic scheduler script:
 ```
 
 The script writes a single task record to the runtime store and prints the resulting JSON.
+
+Supported time expressions include compact durations, verbose durations, direct clock times, `today` and `tomorrow` phrases, `noon`, `midnight`, and `next <weekday>` forms such as `next friday 3pm`.
+
+Use `--dry-run` to preview the normalized task JSON without persisting it.
+
+Use `list` to inspect pending tasks:
+
+```bash
+./scripts/schedule-task.sh list
+```
+
+Use `cancel` to cancel a scheduled task by id:
+
+```bash
+./scripts/schedule-task.sh cancel --id "task_20260408_163500_4821"
+```
 
 If `--reorient` is set, the scheduler first builds snapshot context from `CONTEXT.md` using the `reorient` skill contract, then merges task-specific fields on top. Explicit task summary stays authoritative; reoriented context fills in supporting key points, artifacts, constraints, and source metadata.
 
@@ -135,8 +155,11 @@ Override with environment variables when needed:
 - `DEFER_LOG_FILE`
 - `DEFER_TIMEZONE`
 - `DEFER_EXECUTOR`
+- `DEFER_RETRY_DELAY_SECONDS`
 
 `DEFER_EXECUTOR` should point to an executable that reads one task JSON object from stdin and writes its result to stdout. If no executor is configured, `execute-task.sh` still produces a rehydration prompt file and marks the task complete with `result.type = "prompt_prepared"`.
+
+`DEFER_RETRY_DELAY_SECONDS` controls how long the runner waits before retrying an executor failure when `max_retries` is greater than zero.
 
 ## Execution Modes
 
@@ -147,6 +170,10 @@ Default. Use for most deferred work. The future run starts from the stored snaps
 ### Callback
 
 Use when the future run should feel like a continuation of the original framing. Keep the snapshot tight anyway.
+
+## Retry Behavior
+
+Set `--max-retries <count>` when scheduling if executor failures should be retried. Retries are only used for executor non-zero exits. Missing executors or invalid executor paths still fail immediately.
 
 ## Files
 
@@ -164,6 +191,7 @@ Use when the future run should feel like a continuation of the original framing.
 - Missing `CONTEXT.md` during `--reorient`: fail fast with the exact missing path or lookup mode
 - Invalid time: fail fast before writing any task
 - Duplicate runner overlap: prevented by a runtime lock directory
+- Concurrent task writes: append and replace operations are serialized with a task-file lock
 - Context drift: avoid by storing summary, key points, artifacts, and constraints explicitly
 - Auditing: every schedule, execution, failure, and archive action is appended to the log
 

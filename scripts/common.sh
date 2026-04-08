@@ -8,6 +8,8 @@ DEFER_ARCHIVE_DIR="${DEFER_ARCHIVE_DIR:-$DEFER_RUNTIME_DIR/archive}"
 DEFER_LOG_DIR="${DEFER_LOG_DIR:-$DEFER_RUNTIME_DIR/logs}"
 DEFER_LOG_FILE="${DEFER_LOG_FILE:-$DEFER_LOG_DIR/deferred.log}"
 DEFER_TIMEZONE="${DEFER_TIMEZONE:-${TZ:-}}"
+DEFER_TASKS_LOCK_DIR="${DEFER_TASKS_LOCK_DIR:-$DEFER_RUNTIME_DIR/.deferred-tasks.lock}"
+DEFER_RETRY_DELAY_SECONDS="${DEFER_RETRY_DELAY_SECONDS:-60}"
 
 now_utc_iso() {
   date -u +"%Y-%m-%dT%H:%M:%SZ"
@@ -39,6 +41,17 @@ log_line() {
   printf '%s %s\n' "$(now_utc_iso)" "$*" >> "$DEFER_LOG_FILE"
 }
 
+print_json_output() {
+  local json="$1"
+  local compact_output="${2:-false}"
+
+  if [ "$compact_output" = "true" ]; then
+    printf '%s\n' "$(printf '%s' "$json" | jq -c .)"
+  else
+    printf '%s\n' "$(printf '%s' "$json" | jq .)"
+  fi
+}
+
 json_array_from_args() {
   if [ "$#" -eq 0 ]; then
     printf '[]'
@@ -46,6 +59,33 @@ json_array_from_args() {
   fi
 
   printf '%s\n' "$@" | jq -R . | jq -s .
+}
+
+acquire_tasks_lock() {
+  local stale_pid=""
+
+  ensure_runtime_dirs
+
+  while true; do
+    if mkdir "$DEFER_TASKS_LOCK_DIR" 2>/dev/null; then
+      printf '%s\n' "$$" > "$DEFER_TASKS_LOCK_DIR/pid"
+      return 0
+    fi
+
+    if [ -f "$DEFER_TASKS_LOCK_DIR/pid" ]; then
+      stale_pid="$(cat "$DEFER_TASKS_LOCK_DIR/pid" 2>/dev/null || true)"
+      if [ -n "$stale_pid" ] && ! kill -0 "$stale_pid" 2>/dev/null; then
+        rm -rf "$DEFER_TASKS_LOCK_DIR"
+        continue
+      fi
+    fi
+
+    sleep 0.05
+  done
+}
+
+release_tasks_lock() {
+  rm -rf "$DEFER_TASKS_LOCK_DIR"
 }
 
 replace_task_record() {
@@ -58,6 +98,7 @@ replace_task_record() {
   local line_id
 
   ensure_runtime_dirs
+  acquire_tasks_lock
   updated_compact="$(printf '%s' "$updated_json" | jq -c .)"
   task_id="$(printf '%s' "$updated_compact" | jq -r '.id')"
   tmp_file="$(mktemp "${DEFER_RUNTIME_DIR}/deferred.XXXXXX")"
@@ -81,6 +122,7 @@ replace_task_record() {
   fi
 
   mv "$tmp_file" "$DEFER_TASKS_FILE"
+  release_tasks_lock
 }
 
 append_task_record() {
@@ -88,8 +130,14 @@ append_task_record() {
   local task_compact
 
   ensure_runtime_dirs
+  acquire_tasks_lock
   task_compact="$(printf '%s' "$task_json" | jq -c .)"
   printf '%s\n' "$task_compact" >> "$DEFER_TASKS_FILE"
+  release_tasks_lock
+}
+
+retry_run_at() {
+  python3 "$SCRIPT_DIR/time_utils.py" normalize "in ${DEFER_RETRY_DELAY_SECONDS} seconds"
 }
 
 acquire_runner_lock() {
