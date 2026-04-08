@@ -1,0 +1,7 @@
+interface:
+  display_name: "Defer"
+  short_description: "Schedule stateless work for later execution"
+  default_prompt: "Use $defer to capture this task, schedule it for later, and store a clean re-entry snapshot."
+
+policy:
+  allow_implicit_invocation: true

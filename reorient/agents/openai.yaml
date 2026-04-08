@@ -1,0 +1,7 @@
+interface:
+  display_name: "Reorient"
+  short_description: "Refresh project context from a CONTEXT.md file"
+  default_prompt: "Use $reorient to re-read project context and restate the current constraints before continuing."
+
+policy:
+  allow_implicit_invocation: true
