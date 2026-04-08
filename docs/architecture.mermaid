@@ -1,0 +1,26 @@
+flowchart LR
+    User["::defer 30m\nresume the review"]
+    Schedule["schedule-task.sh"]
+    JSONL[("deferred.jsonl")]
+    Cron["cron (1 min)"]
+    Runner["run-deferred.sh"]
+    Exec["execute-task.sh"]
+    Executor["DEFER_EXECUTOR\n(optional)"]
+    Prompt["logs/task.prompt.txt"]
+    Archive[("archive/\ndeferred_YYYYMM.jsonl")]
+
+    User --> Schedule
+    Schedule -->|"normalize time\nbuild snapshot\nappend record"| JSONL
+    Cron -->|"wakes"| Runner
+    Runner -->|"scan due tasks"| JSONL
+    Runner --> Exec
+    Exec -->|"always"| Prompt
+    Exec -.->|"if configured"| Executor
+    Exec -->|"completed / failed"| JSONL
+    Runner --> Archive
+
+    style User fill:#e8f4f8,stroke:#1a1a2e,color:#1a1a2e
+    style JSONL fill:#fff3cd,stroke:#856404,color:#856404
+    style Archive fill:#fff3cd,stroke:#856404,color:#856404
+    style Prompt fill:#d4edda,stroke:#155724,color:#155724
+    style Executor fill:#f8d7da,stroke:#721c24,color:#721c24,stroke-dasharray: 5 5

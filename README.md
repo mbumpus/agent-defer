@@ -1,63 +1,49 @@
 # Agent Defer
 
-Stateless deferred execution for AI workflows: schedule, snapshot, rehydrate, and resume via JSONL and cron.
+[![Tests](https://img.shields.io/badge/tests-210%20%2F%20211%20passing-brightgreen)](#test-results)
+[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![Status](https://img.shields.io/badge/status-stable%20v1.0-informational)](#whats-stable)
 
-Agent Defer is a small skill-driven runtime for time-based re-entry. Instead of relying on long-lived agent state, it captures a compact task snapshot, persists it to an auditable log, and lets a cron-driven runner wake up later to continue the work.
+Stateless deferred execution for AI workflows. Schedule, snapshot, rehydrate, and resume — with JSONL, shell scripts, and cron.
 
-The main primitive in this repository is [`defer`](./SKILL.md). It handles scheduling, snapshot persistence, execution, and archival. The repo also includes [`reorient`](./reorient/SKILL.md), which can rebuild clean context from a `CONTEXT.md` file before a task is scheduled.
+## Why This Exists
+
+AI agents lose context between sessions. Long-running work gets dropped when conversations end. Most solutions reach for databases, daemons, or orchestration frameworks.
+
+Agent Defer takes a different approach: capture a compact snapshot of intent, persist it as one JSON line, and let cron wake a runner to continue the work later. No daemon. No database. No state held in memory. If the machine reboots, cron picks up where it left off.
+
+The result is a time-based re-entry primitive that is stateless, auditable, and easy to reason about.
 
 ## How It Works
 
-1. Capture the task as a structured snapshot instead of raw chat history.
-2. Normalize a future execution time such as `10m`, `2h`, or `tomorrow 9am`.
-3. Persist the task as one JSON object per line in `deferred.jsonl`.
-4. Let cron invoke the runner once a minute.
-5. Rehydrate the stored context and execute the next step.
-
-This keeps the system stateless, log-driven, auditable, and easy to replay.
-
-## Included Skills
-
-### `defer`
-
-- Schedules future work with natural-language or duration-based time input
-- Accepts direct phrases like `noon`, `midnight`, and `next monday 9am`
-- Interprets naive times in machine time or `DEFER_TIMEZONE` if configured
-- Persists compact task snapshots to JSONL
-- Supports `fresh` and `callback` execution modes
-- Supports `--dry-run`, `list`, `cancel`, and simple retry configuration
-- Rehydrates due tasks from cron
-- Logs scheduling, execution, failure, and archival events
-
-### `reorient`
-
-- Re-reads project context from `CONTEXT.md`
-- Extracts a compact summary, constraints, references, and open questions
-- Feeds cleaned context into deferred snapshots when requested via `--reorient`
-
-## Repository Layout
-
-```text
-.
-├── SKILL.md
-├── agents/openai.yaml
-├── references/task-schema.md
-├── scripts/
-│   ├── archive-deferred.sh
-│   ├── common.sh
-│   ├── execute-task.sh
-│   ├── reorient_snapshot.py
-│   ├── run-deferred.sh
-│   ├── schedule-task.sh
-│   └── time_utils.py
-└── reorient/
-    ├── SKILL.md
-    └── agents/openai.yaml
 ```
+  User                schedule-task.sh         deferred.jsonl
+   |                        |                       |
+   |--- ::defer 30m ------->|                       |
+   |                        |-- normalize time      |
+   |                        |-- build snapshot      |
+   |                        |-- append record ----->|
+   |                                                |
+   |    cron (every minute)     run-deferred.sh     |
+   |         |                       |              |
+   |         |--- wake ------------->|              |
+   |         |                       |-- scan ----->|
+   |         |                       |              |
+   |         |                  execute-task.sh     |
+   |         |                       |              |
+   |         |                       |-- write prompt artifact
+   |         |                       |-- invoke executor (optional)
+   |         |                       |-- update status -------->|
+   |         |                       |              |
+   |         |                  archive-deferred.sh |
+   |         |                       |-- sweep terminal records
+```
+
+See [docs/architecture.md](docs/architecture.md) for the full design and [docs/lifecycle.md](docs/lifecycle.md) for state transitions.
 
 ## Quick Start
 
-Schedule a deferred task:
+### 1. Schedule a task
 
 ```bash
 ./scripts/schedule-task.sh \
@@ -66,78 +52,199 @@ Schedule a deferred task:
   --intent "resume_task"
 ```
 
-Preview a task without writing it:
-
-```bash
-./scripts/schedule-task.sh \
-  --when "noon" \
-  --summary "Check the build at midday" \
-  --dry-run
-```
-
-Schedule a task after reorienting from a context file:
-
-```bash
-./scripts/schedule-task.sh \
-  --when "next monday 9am" \
-  --reorient \
-  --context-file "/abs/path/to/CONTEXT.md" \
-  --summary "Continue the review with fresh context"
-```
-
-List pending tasks:
+### 2. See what's pending
 
 ```bash
 ./scripts/schedule-task.sh list
 ```
 
-Cancel a scheduled task:
-
-```bash
-./scripts/schedule-task.sh cancel --id "task_20260408_163500_4821" --reason "No longer needed"
-```
-
-Run due tasks manually:
+### 3. Run due tasks
 
 ```bash
 ./scripts/run-deferred.sh
 ```
 
-Run it continuously from cron:
+### 4. Check the archive
+
+```bash
+cat ~/data/runtime/archive/deferred_*.jsonl | jq .
+```
+
+### Full loop demo
+
+```bash
+# Schedule a task due immediately
+./scripts/schedule-task.sh --when "now" --summary "Check build status" --id "demo_1"
+
+# Verify it's pending
+./scripts/schedule-task.sh list --compact
+
+# Execute due tasks
+./scripts/run-deferred.sh
+
+# Task is now archived; prompt artifact is in logs/
+cat ~/data/runtime/logs/demo_1.prompt.txt
+```
+
+See [examples/](examples/) for more: a simple reminder, a resumed analysis, and a scheduled reorient.
+
+## Features
+
+- **Natural-language scheduling**: `10m`, `2h`, `tomorrow 9am`, `noon`, `midnight`, `next friday 3pm`
+- **Compact snapshots**: summary, key points, artifacts, constraints — not raw chat history
+- **Two execution modes**: `fresh` (default) and `callback`
+- **Retry with backoff**: `--max-retries` reschedules executor failures automatically
+- **Preview before committing**: `--dry-run` shows the task JSON without persisting
+- **Task management**: `list` and `cancel` subcommands
+- **Reorientation**: `--reorient` rebuilds context from `CONTEXT.md` before scheduling
+- **Scripting-friendly**: `--compact` emits single-line JSON
+- **Deterministic timezone handling**: machine time or `DEFER_TIMEZONE`; explicit suffixes like `3pm EST` are rejected
+- **Concurrency-safe**: file-level locking on all writes; runner lock prevents cron overlap
+- **Auditable**: every action logged to `deferred.log`; prompt artifacts always created
+
+## Included Skills
+
+### `defer`
+
+The main primitive. Handles scheduling, snapshot persistence, execution, and archival. See [SKILL.md](SKILL.md).
+
+### `reorient`
+
+Rebuilds clean context from a `CONTEXT.md` file and feeds it into deferred snapshots. See [reorient/SKILL.md](reorient/SKILL.md).
+
+## Repository Layout
+
+```
+.
+├── SKILL.md                    # Defer skill definition
+├── README.md
+├── LICENSE
+├── CHANGELOG.md
+├── RELEASE_NOTES_v1.md
+├── Makefile
+├── .env.example
+├── agents/openai.yaml
+├── references/task-schema.md   # JSON schema and executor contract
+├── scripts/
+│   ├── archive-deferred.sh
+│   ├── common.sh
+│   ├── execute-task.sh
+│   ├── reorient_snapshot.py
+│   ├── run-deferred.sh
+│   ├── schedule-task.sh
+│   └── time_utils.py
+├── reorient/
+│   ├── SKILL.md
+│   └── agents/openai.yaml
+├── tests/
+│   ├── test_time_utils.py
+│   ├── test_reorient_snapshot.py
+│   ├── test_shell_scripts.sh
+│   └── test_new_features.sh
+├── examples/
+│   ├── reminder.sh
+│   ├── resume-analysis.sh
+│   └── scheduled-reorient.sh
+└── docs/
+    ├── architecture.md
+    ├── architecture.mermaid
+    ├── lifecycle.md
+    └── reports/
+        └── final-test-report.pdf
+```
+
+## Runtime
+
+By default, runtime state lives outside the repository:
+
+```
+~/data/runtime/deferred.jsonl       # Active task store
+~/data/runtime/archive/             # Monthly archives
+~/data/runtime/logs/                # Prompt artifacts and audit log
+```
+
+### Environment Variables
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `DEFER_RUNTIME_DIR` | `~/data/runtime` | Root directory for all runtime state |
+| `DEFER_TASKS_FILE` | `$DEFER_RUNTIME_DIR/deferred.jsonl` | Active task store |
+| `DEFER_ARCHIVE_DIR` | `$DEFER_RUNTIME_DIR/archive` | Monthly archive directory |
+| `DEFER_LOG_DIR` | `$DEFER_RUNTIME_DIR/logs` | Prompt artifacts and log directory |
+| `DEFER_LOG_FILE` | `$DEFER_LOG_DIR/deferred.log` | Audit log |
+| `DEFER_TIMEZONE` | System timezone | Timezone for non-ISO time expressions |
+| `DEFER_EXECUTOR` | *(none)* | Executable that processes task JSON on stdin |
+| `DEFER_CONTEXT_FILE` | *(none)* | Fallback context file for `reorient_snapshot.py` |
+| `DEFER_RETRY_DELAY_SECONDS` | `60` | Delay before retrying a failed executor |
+
+See [.env.example](.env.example) for a starter configuration.
+
+### Cron Setup
 
 ```cron
 * * * * * /absolute/path/to/scripts/run-deferred.sh
 ```
 
-## Runtime
+## Test Results
 
-By default, runtime state is stored outside the repository:
+211 tests across 4 suites. 210 passing. 99.5% pass rate.
 
-```text
-~/data/runtime/deferred.jsonl
-~/data/runtime/archive/
-~/data/runtime/logs/
+| Suite | Tests | Passed |
+|---|---|---|
+| `time_utils.py` (Python) | 59 | 59 |
+| `reorient_snapshot.py` (Python) | 28 | 28 |
+| Shell scripts (original) | 70 | 70 |
+| Shell scripts (new features) | 54 | 53* |
+
+\* One test-harness issue (grep regex syntax with `[]`), not a code bug.
+
+```bash
+make test
 ```
 
-You can override that with:
+The full test report is in [docs/reports/final-test-report.pdf](docs/reports/final-test-report.pdf).
 
-- `DEFER_RUNTIME_DIR`
-- `DEFER_TASKS_FILE`
-- `DEFER_ARCHIVE_DIR`
-- `DEFER_LOG_DIR`
-- `DEFER_LOG_FILE`
-- `DEFER_TIMEZONE`
-- `DEFER_EXECUTOR`
-- `DEFER_CONTEXT_FILE`
-- `DEFER_RETRY_DELAY_SECONDS`
+## What's Stable
 
-## Notes
+These are committed interfaces. They won't break without a major version bump.
 
-- `DEFER_EXECUTOR` is optional. A rehydration prompt artifact is always written first; if no executor is set, execution stops there.
-- All non-ISO time expressions are interpreted in machine time, or in `DEFER_TIMEZONE` if that environment variable is set.
-- Explicit timezone suffixes such as `3pm EST` are intentionally rejected to keep scheduling deterministic.
-- `aura_level` is an advisory execution-intensity hint stored on the task and passed through to the executor. The current scripts accept `low`, `medium`, and `high`.
-- `max_retries` reschedules executor failures for a later attempt. The retry delay defaults to 60 seconds and can be overridden with `DEFER_RETRY_DELAY_SECONDS`.
-- `DEFER_CONTEXT_FILE` is a fallback used by the reorient snapshot helper when `--reorient` is active and no explicit context source is provided.
-- The runtime intentionally lives outside the repo by default so scheduled state and logs do not pollute the source tree.
-- This repository is licensed under `MIT`. That applies to both the scripts and the skill Markdown files, since the Markdown is part of the instruction surface.
+- JSONL task persistence format ([references/task-schema.md](references/task-schema.md))
+- Cron wake cycle (`run-deferred.sh`)
+- `fresh` and `callback` execution modes
+- Retry behavior (`max_retries`, `DEFER_RETRY_DELAY_SECONDS`)
+- `list` and `cancel` subcommands
+- Time expression parsing (durations, clock times, weekdays, ISO)
+- Reorient integration (`--reorient`, `--context-file`, `--project`)
+- All environment variables listed above
+- Executor contract (stdin JSON, stdout result, exit code)
+
+## Extension Points
+
+These are designed to be built on.
+
+- **Executor adapters**: Write any executable that reads task JSON from stdin. Shell scripts, Python, compiled binaries — anything that follows the contract.
+- **Alternative storage backends**: Replace `deferred.jsonl` with a database by swapping `append_task_record` and `replace_task_record` in `common.sh`.
+- **Webhook or event triggers**: Wrap `schedule-task.sh` in an HTTP endpoint or message queue consumer.
+- **UI wrappers**: `list --compact` and `cancel --compact` emit machine-readable JSON for frontend consumption.
+- **Multi-agent routing**: Use `execution.aura_level` or custom executor logic to route tasks to different agents based on complexity.
+
+## Documentation
+
+- [Architecture](docs/architecture.md) — data flow, design decisions, file roles
+- [Lifecycle](docs/lifecycle.md) — task states, transitions, dynamic fields, result types
+- [Task Schema](references/task-schema.md) — canonical JSON shape, executor contract, scheduling policy
+- [SKILL.md](SKILL.md) — the defer skill definition for AI agent integration
+- [Changelog](CHANGELOG.md)
+- [Release Notes v1.0](RELEASE_NOTES_v1.md)
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Security
+
+See [SECURITY.md](SECURITY.md) for the security model and reporting policy.
+
+## License
+
+[MIT](LICENSE)
