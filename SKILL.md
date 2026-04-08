@@ -40,6 +40,7 @@ Examples:
 - `::defer tomorrow 9am follow up with the latest findings`
 - `::defer noon check whether the deploy cleared`
 - `::defer next monday 9am resume the architecture review`
+- `::defer now re-run the executor path with current context`
 
 Translate the request into:
 
@@ -79,9 +80,23 @@ Use the deterministic scheduler script:
 
 The script writes a single task record to the runtime store and prints the resulting JSON.
 
-Supported time expressions include compact durations, verbose durations, direct clock times, `today` and `tomorrow` phrases, `noon`, `midnight`, and `next <weekday>` forms such as `next friday 3pm`.
+Supported time expressions include `now`, compact durations, verbose durations, direct clock times, `today` and `tomorrow` phrases, `noon`, `midnight`, and `next <weekday>` forms such as `next friday 3pm`.
 
 Use `--dry-run` to preview the normalized task JSON without persisting it.
+
+Use `--compact` to emit single-line JSON for scripting or piping:
+
+```bash
+./scripts/schedule-task.sh list --compact
+```
+
+Use `--context-json` when the snapshot has already been prepared upstream and should be merged directly into the scheduled task:
+
+```bash
+./scripts/schedule-task.sh \
+  --when "30m" \
+  --context-json '{"summary":"Resume review","key_points":["focus on retries"],"artifacts":[],"constraints":[]}'
+```
 
 Use `list` to inspect pending tasks:
 
@@ -156,10 +171,13 @@ Override with environment variables when needed:
 - `DEFER_TIMEZONE`
 - `DEFER_EXECUTOR`
 - `DEFER_RETRY_DELAY_SECONDS`
+- `DEFER_CONTEXT_FILE`
 
 `DEFER_EXECUTOR` should point to an executable that reads one task JSON object from stdin and writes its result to stdout. If no executor is configured, `execute-task.sh` still produces a rehydration prompt file and marks the task complete with `result.type = "prompt_prepared"`.
 
 `DEFER_RETRY_DELAY_SECONDS` controls how long the runner waits before retrying an executor failure when `max_retries` is greater than zero.
+
+`DEFER_CONTEXT_FILE` is used by `reorient_snapshot.py` as a fallback when `--reorient` is set and no explicit `--context-file` or `--project` is provided.
 
 ## Execution Modes
 

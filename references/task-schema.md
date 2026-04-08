@@ -33,6 +33,7 @@
   "status": "scheduled",
   "attempts": 0,
   "max_retries": 2,
+  "reorient_requested": true,
   "reorient": {
     "requested": true,
     "project": null,
@@ -53,6 +54,28 @@ Terminal records are moved to `archive/deferred_YYYYMM.jsonl`.
 
 When an executor fails and `attempts < max_retries`, the task is returned to `scheduled` with a new `run_at`, updated `attempts`, and `last_error`.
 
+## Dynamic Fields
+
+These fields appear during lifecycle transitions and are not always present on the initial scheduled record:
+
+- `started_at`: set when the runner claims a task
+- `completed_at`: set when execution completes
+- `failed_at`: set when execution fails terminally
+- `cancelled_at`: set when a scheduled task is cancelled
+- `cancel_reason`: optional cancellation reason, `null` when omitted
+- `last_attempt_at`: set when an executor failure triggers a retry
+- `last_error`: most recent executor error recorded before retry
+- `error`: terminal failure reason
+
+## Result Types
+
+`result.type` can be one of:
+
+- `prompt_prepared`: no executor was configured; a prompt artifact was created
+- `executor_output`: executor succeeded and returned output
+- `executor_failed`: executor failed terminally after retries were exhausted
+- `retry_scheduled`: executor failed but the task was rescheduled for another attempt
+
 ## Executor Contract
 
 If `DEFER_EXECUTOR` is set, it must be an executable path. The executor:
@@ -64,7 +87,9 @@ If `DEFER_EXECUTOR` is set, it must be an executable path. The executor:
 
 The executor is intentionally simple so the skill remains stateless and auditable.
 
-If `DEFER_EXECUTOR` is not set, the skill still rehydrates the task into `logs/<task-id>.prompt.txt` so the operator can inspect or replay it manually.
+The prompt artifact at `logs/<task-id>.prompt.txt` is always created as an audit trail before executor handling begins.
+
+If `DEFER_EXECUTOR` is not set, execution stops after creating that prompt artifact.
 
 ## Execution Fields
 

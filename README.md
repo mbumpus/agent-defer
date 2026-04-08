@@ -133,10 +133,11 @@ You can override that with:
 
 ## Notes
 
-- `DEFER_EXECUTOR` is optional. If it is not set, execution writes a rehydration prompt artifact instead of invoking an external executor.
+- `DEFER_EXECUTOR` is optional. A rehydration prompt artifact is always written first; if no executor is set, execution stops there.
 - All non-ISO time expressions are interpreted in machine time, or in `DEFER_TIMEZONE` if that environment variable is set.
 - Explicit timezone suffixes such as `3pm EST` are intentionally rejected to keep scheduling deterministic.
 - `aura_level` is an advisory execution-intensity hint stored on the task and passed through to the executor. The current scripts accept `low`, `medium`, and `high`.
 - `max_retries` reschedules executor failures for a later attempt. The retry delay defaults to 60 seconds and can be overridden with `DEFER_RETRY_DELAY_SECONDS`.
+- `DEFER_CONTEXT_FILE` is a fallback used by the reorient snapshot helper when `--reorient` is active and no explicit context source is provided.
 - The runtime intentionally lives outside the repo by default so scheduled state and logs do not pollute the source tree.
 - This repository is licensed under `MIT`. That applies to both the scripts and the skill Markdown files, since the Markdown is part of the instruction surface.
