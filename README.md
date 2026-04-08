@@ -12,6 +12,8 @@ AI agents lose context between sessions. Long-running work gets dropped when con
 
 Agent Defer takes a different approach: capture a compact snapshot of intent, persist it as one JSON line, and let cron wake a runner to continue the work later. No daemon. No database. No state held in memory. If the machine reboots, cron picks up where it left off.
 
+### Agent Defer treats time as a trigger, not a process.
+
 The result is a time-based re-entry primitive that is stateless, auditable, and easy to reason about.
 
 ## How It Works
